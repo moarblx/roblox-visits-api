@@ -1,15 +1,3 @@
-const express = require("express");
-const fetch = require("node-fetch");
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-async function fetchJSON(url) {
-  const res = await fetch(url, { headers: { "User-Agent": "VisitFetcher/1.0" } });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  return await res.json();
-}
-
 async function fetchGamesAndVisits(ownerType, ownerId) {
   let total = 0;
   let cursor = "";
@@ -29,7 +17,7 @@ async function fetchGamesAndVisits(ownerType, ownerId) {
       }
     } catch (err) {
       console.error(`Failed to fetch games for ${ownerType} ${ownerId}:`, err.message);
-      // Stop fetching on error but keep total from previous pages
+      // stop paging on error
       hasMore = false;
     }
   }
@@ -41,9 +29,8 @@ async function fetchOwnedGroups(userId) {
   try {
     const url = `https://groups.roblox.com/v1/users/${userId}/groups/roles`;
     const data = await fetchJSON(url);
-    return data.data
-      .filter(g => g.role.rank === 255)
-      .map(g => g.group.id);
+    // Only groups where role.rank == 255 (owner)
+    return data.data.filter(g => g.role.rank === 255).map(g => g.group.id);
   } catch (err) {
     console.error(`Failed to fetch groups for user ${userId}:`, err.message);
     return [];
@@ -57,12 +44,17 @@ app.get("/totalVisits", async (req, res) => {
   }
 
   try {
+    // 1. Player's own games visits
     let totalVisits = await fetchGamesAndVisits("users", userId);
 
+    // 2. Owned groups
     const ownedGroups = await fetchOwnedGroups(userId);
+
+    // 3. Sum visits of games owned by each group
     for (const groupId of ownedGroups) {
       try {
-        totalVisits += await fetchGamesAndVisits("groups", groupId);
+        const groupVisits = await fetchGamesAndVisits("groups", groupId);
+        totalVisits += groupVisits;
       } catch (err) {
         console.error(`Error fetching visits for group ${groupId}:`, err.message);
       }
@@ -73,8 +65,4 @@ app.get("/totalVisits", async (req, res) => {
     console.error("Unexpected error:", err);
     res.status(500).json({ error: err.message });
   }
-});
-
-app.listen(PORT, () => {
-  console.log(`Visit API running on port ${PORT}`);
 });
